@@ -370,3 +370,75 @@ body {
 .ai-status.hidden {
   display: none;
 }
+
+/* 難易度セレクタ */
+.mode-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.mode-label {
+  color: var(--muted);
+  font-weight: bold;
+  font-size: 0.9rem;
+}
+
+.mode-btn {
+  font-size: 0.95rem;
+  font-weight: bold;
+  color: var(--muted);
+  background: #fff;
+  border: 2px solid #eadfce;
+  border-radius: 14px;
+  padding: 6px 16px;
+  cursor: pointer;
+}
+
+.mode-btn.is-active {
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+/* 手番表示 */
+.turn-indicator {
+  margin: 14px 0 0;
+  font-weight: 800;
+  color: var(--ink);
+}
+
+.turn-indicator.thinking {
+  color: var(--accent);
+  animation: blink 1s ease-in-out infinite;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+/* 履歴の話者アイコン */
+.history-item .who {
+  font-size: 1rem;
+}
+
+.history-item.speaker-ai {
+  background: #eaf5ff;
+}
+
+.history-item.speaker-child {
+  background: #fff6e9;
+}
+
+/* かち演出 */
+.overlay.win .overlay-card {
+  background: linear-gradient(160deg, #fff9e6, #ffeaa7);
+}
+
+.overlay.win #end-title {
+  color: var(--ok);
+}

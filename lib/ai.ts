@@ -184,3 +184,72 @@ export async function suggestHintWord(
     riddle: String(input.riddle ?? ""),
   };
 }
+
+export type Difficulty = "easy" | "normal";
+
+export interface OpponentWord {
+  /** AIが打つ語（表記） */
+  word: string;
+  /** その語のひらがなよみ */
+  reading: string;
+  /** カテゴリ（幼児向け分類） */
+  category: Category;
+}
+
+/**
+ * AI対戦の「次の一手」を生成する。
+ * nextChar から始まり、usedWords に含まれず、「ん」で終わらない実在語を選ぶ。
+ * 勝敗の最終判定はサーバー側の決定論コードで再検証する前提（ここは候補生成のみ）。
+ * @param avoid リトライ時に避けたい語（前回の不正な候補）
+ */
+export async function generateOpponentWord(
+  nextChar: string,
+  usedWords: string[],
+  difficulty: Difficulty = "easy",
+  avoid: string[] = [],
+): Promise<OpponentWord> {
+  const level = difficulty === "easy"
+    ? "幼児（4〜6歳）が知っている、とてもやさしい身近な言葉を選んでください。"
+    : "小学生でも分かる、少し幅広い言葉を選んでください。";
+  const system = "あなたは幼児向けしりとりゲームの対戦あいてです。" +
+    "指定された文字からはじまる実在する日本語の一般名詞を1つ選びます。" +
+    level +
+    "ぜったいに「ん」で終わる言葉を選ばないでください。" +
+    "よみは現代仮名遣いのひらがなで、記号を含めないでください。";
+  const avoidList = [...usedWords, ...avoid];
+  const used = avoidList.length > 0
+    ? `つぎの言葉は使わないでください: ${avoidList.join("、")}。`
+    : "";
+  const input = await callTool(
+    system,
+    `「${nextChar}」からはじまる言葉を1つ選んでください。${used}`,
+    {
+      name: "report_move",
+      description: "しりとりの次の一手を報告する",
+      input_schema: {
+        type: "object",
+        properties: {
+          word: { type: "string", description: "打つ語（表記）" },
+          reading: {
+            type: "string",
+            description: "その語の現代仮名遣いのひらがなよみ（記号なし）",
+          },
+          category: {
+            type: "string",
+            enum: CATEGORIES,
+            description: "幼児向けカテゴリ",
+          },
+        },
+        required: ["word", "reading", "category"],
+      },
+    },
+    "report_move",
+  );
+  return {
+    word: String(input.word ?? ""),
+    reading: String(input.reading ?? ""),
+    category: (CATEGORIES as readonly string[]).includes(String(input.category))
+      ? (input.category as Category)
+      : "その他",
+  };
+}

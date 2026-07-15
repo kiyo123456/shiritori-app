@@ -10,8 +10,19 @@
     <main class="app">
       <header class="header">
         <h1>🦁 ことばであそぼ！しりとり</h1>
-        <p class="subtitle">あそびながら ことばを おぼえよう</p>
+        <p class="subtitle">🤖 AIと あそびながら ことばを おぼえよう</p>
       </header>
+
+      <!-- 難易度セレクタ -->
+      <div class="mode-row" role="group" aria-label="AIのつよさ">
+        <span class="mode-label">AIのつよさ</span>
+        <button type="button" class="mode-btn is-active" data-diff="easy">
+          やさしい
+        </button>
+        <button type="button" class="mode-btn" data-diff="normal">
+          ふつう
+        </button>
+      </div>
 
       <!-- 直前の単語 -->
       <section class="current-card" aria-live="polite">
@@ -24,6 +35,7 @@
         <p id="current-reading" class="current-reading"></p>
         <p
           class="next-hint">つぎは <span id="next-char" class="next-char">？</span> から！</p>
+        <p id="turn-indicator" class="turn-indicator">🧒 きみの ばん</p>
       </section>
 
       <!-- 入力 -->
