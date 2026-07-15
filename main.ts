@@ -12,10 +12,21 @@
 import { serveDir } from "jsr:@std/http@1/file-server";
 import {
   AiError,
+  type Difficulty,
+  generateOpponentWord,
   judgeWord,
   NoApiKeyError,
   suggestHintWord,
 } from "./lib/ai.ts";
+// AI の手も決定論で検証する（勝敗ロジックの単一の源）
+import { connects, endsWithN, normalizeWord } from "./public/shiritori.js";
+
+/** AI/キー由来の縮退はログに理由だけ残す（キーは出さない）。想定外は throw 元も残す */
+function logDegraded(where: string, e: unknown): void {
+  const known = e instanceof NoApiKeyError || e instanceof AiError;
+  const msg = e instanceof Error ? e.message : String(e);
+  console.error(`[${where}] degraded${known ? "" : " (unexpected)"}: ${msg}`);
+}
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -39,17 +50,13 @@ async function handleJudge(req: Request): Promise<Response> {
     return json({ ...result, degraded: false });
   } catch (e) {
     // 縮退運転: AI 無しでも、かな入力ならそのまま読みとして続行できる。
-    const degraded = {
+    logDegraded("judge", e);
+    return json({
       reading: word,
       isReal: true, // 実在チェックはスキップ
       category: null,
       degraded: true,
-    };
-    if (e instanceof NoApiKeyError || e instanceof AiError) {
-      return json(degraded);
-    }
-    console.error("judge failed:", e);
-    return json(degraded);
+    });
   }
 }
 
@@ -114,9 +121,7 @@ async function handleHint(req: Request): Promise<Response> {
       degraded: false,
     });
   } catch (e) {
-    if (!(e instanceof NoApiKeyError || e instanceof AiError)) {
-      console.error("hint failed:", e);
-    }
+    logDegraded("hint", e);
     // 縮退: 固定文言
     return json({
       hint: `「${nextChar}」からはじまることばを かんがえてみよう！`,
@@ -126,7 +131,54 @@ async function handleHint(req: Request): Promise<Response> {
   }
 }
 
-Deno.serve(async (req: Request) => {
+async function handleOpponent(req: Request): Promise<Response> {
+  let nextChar = "";
+  let usedWords: string[] = [];
+  let difficulty: Difficulty = "easy";
+  try {
+    const body = await req.json();
+    nextChar = String(body.nextChar ?? "").trim();
+    usedWords = Array.isArray(body.usedWords) ? body.usedWords.map(String) : [];
+    difficulty = body.difficulty === "normal" ? "normal" : "easy";
+  } catch {
+    return json({ error: "invalid body" }, 400);
+  }
+  if (!nextChar) return json({ error: "empty nextChar" }, 400);
+
+  const used = new Set(usedWords.map(normalizeWord));
+  const isValid = (reading: string): boolean =>
+    connects(nextChar, reading) && !endsWithN(reading) &&
+    !used.has(normalizeWord(reading));
+
+  try {
+    const avoid: string[] = [];
+    // AI の候補を最大2回まで試し、決定論検証を通ったものだけ採用する
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const move = await generateOpponentWord(
+        nextChar,
+        usedWords,
+        difficulty,
+        avoid,
+      );
+      if (isValid(move.reading)) {
+        return json({ ...move, gaveUp: false, degraded: false });
+      }
+      avoid.push(move.word || move.reading);
+    }
+    // 有効な手を出せなかった → AI の降参（子のかち）
+    return json({ gaveUp: true, degraded: false });
+  } catch (e) {
+    logDegraded("opponent", e);
+    // AI が使えない → フロントはソロにフォールバック
+    return json({ gaveUp: false, degraded: true });
+  }
+}
+
+// Deno Deploy はリッスンすべきポートを PORT 環境変数で渡す。
+// ローカルは未設定なので 8000 にフォールバックする。
+const port = Number(Deno.env.get("PORT")) || 8000;
+
+Deno.serve({ port }, async (req: Request) => {
   const url = new URL(req.url);
 
   if (req.method === "POST" && url.pathname === "/api/judge") {
@@ -134,6 +186,15 @@ Deno.serve(async (req: Request) => {
   }
   if (req.method === "POST" && url.pathname === "/api/hint") {
     return await handleHint(req);
+  }
+  if (req.method === "POST" && url.pathname === "/api/opponent") {
+    return await handleOpponent(req);
+  }
+
+  // `//` を含む不審なパスは serveDir がオープンリダイレクト的な 301 を返すため、
+  // リダイレクトさせず 404 にする（Deno Deploy warm-up のリダイレクト検査対策）。
+  if (url.pathname.includes("//")) {
+    return new Response("Not Found", { status: 404 });
   }
 
   // 静的配信（public/ 配下）
