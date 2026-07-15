@@ -174,7 +174,11 @@ async function handleOpponent(req: Request): Promise<Response> {
   }
 }
 
-Deno.serve(async (req: Request) => {
+// Deno Deploy はリッスンすべきポートを PORT 環境変数で渡す。
+// ローカルは未設定なので 8000 にフォールバックする。
+const port = Number(Deno.env.get("PORT")) || 8000;
+
+Deno.serve({ port }, async (req: Request) => {
   const url = new URL(req.url);
 
   if (req.method === "POST" && url.pathname === "/api/judge") {
