@@ -1,0 +1,10 @@
+{
+  "tasks": {
+    "dev": "deno run --allow-net --allow-read --allow-env --env-file --watch main.ts",
+    "start": "deno run --allow-net --allow-read --allow-env --env-file main.ts",
+    "test": "deno test --allow-none lib/"
+  },
+  "fmt": {
+    "exclude": ["public/vendor"]
+  }
+}

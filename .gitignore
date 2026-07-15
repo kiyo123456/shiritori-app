@@ -1,0 +1,10 @@
+# 環境変数（APIキーは絶対にコミットしない）
+.env
+.env.*
+
+# OS / editor
+.DS_Store
+*.swp
+
+# Deno
+deno.lock

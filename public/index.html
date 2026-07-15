@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ことばであそぼ！しりとり</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="header">
+        <h1>🦁 ことばであそぼ！しりとり</h1>
+        <p class="subtitle">あそびながら ことばを おぼえよう</p>
+      </header>
+
+      <!-- 直前の単語 -->
+      <section class="current-card" aria-live="polite">
+        <p class="current-label">いまの ことば</p>
+        <div class="current-word-row">
+          <span id="current-word" class="current-word">…</span>
+          <button id="speak-btn" class="icon-btn" title="よみあげる"
+            aria-label="よみあげる">🔊</button>
+        </div>
+        <p id="current-reading" class="current-reading"></p>
+        <p
+          class="next-hint">つぎは <span id="next-char" class="next-char">？</span> から！</p>
+      </section>
+
+      <!-- 入力 -->
+      <section class="input-area">
+        <form id="input-form" autocomplete="off">
+          <input
+            id="word-input"
+            class="word-input"
+            type="text"
+            inputmode="text"
+            placeholder="ことばを いれてね"
+            aria-label="ことばを いれてね"
+          />
+          <button type="submit" id="submit-btn"
+            class="primary-btn">こたえる</button>
+        </form>
+        <div id="message" class="message" role="status"
+          aria-live="assertive"></div>
+        <div class="hint-row">
+          <button id="hint-btn" class="ghost-btn">💡 ヒント</button>
+          <span id="hint-text" class="hint-text"></span>
+        </div>
+      </section>
+
+      <!-- 履歴・育成の可視化 -->
+      <section class="history-area">
+        <div class="history-head">
+          <h2>つかった ことば</h2>
+          <span id="word-count" class="count-badge">0こ</span>
+        </div>
+        <div id="category-counts" class="category-counts"></div>
+        <ul id="history-list" class="history-list"></ul>
+      </section>
+
+      <div class="controls">
+        <button id="reset-btn" class="reset-btn">🔄 さいしょから</button>
+      </div>
+    </main>
+
+    <!-- 終了オーバーレイ -->
+    <div id="end-overlay" class="overlay hidden" role="dialog"
+      aria-modal="true">
+      <div class="overlay-card">
+        <h2 id="end-title">おわり！</h2>
+        <p id="end-reason" class="end-reason"></p>
+        <p
+          class="end-score">きょうは <span id="end-count">0</span>こ の ことばが つかえたね！</p>
+        <div id="end-categories" class="end-categories"></div>
+        <button id="end-reset-btn"
+          class="primary-btn">もういちど あそぶ</button>
+      </div>
+    </div>
+
+    <div id="ai-status"
+      class="ai-status hidden">💤 いまは AI おやすみちゅう</div>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
