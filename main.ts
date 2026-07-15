@@ -191,6 +191,12 @@ Deno.serve({ port }, async (req: Request) => {
     return await handleOpponent(req);
   }
 
+  // `//` を含む不審なパスは serveDir がオープンリダイレクト的な 301 を返すため、
+  // リダイレクトさせず 404 にする（Deno Deploy warm-up のリダイレクト検査対策）。
+  if (url.pathname.includes("//")) {
+    return new Response("Not Found", { status: 404 });
+  }
+
   // 静的配信（public/ 配下）
   return await serveDir(req, {
     fsRoot: "public",
