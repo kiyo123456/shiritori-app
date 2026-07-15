@@ -1,16 +1,19 @@
 /**
- * Anthropic Claude Haiku 4.5 呼び出し層。
+ * Groq 呼び出し層（OpenAI互換 Chat Completions API）。
  *
  * ここが担うのは「ゆらぎのある判断」のみ:
  *   - judgeWord: 単語のよみ・実在性・カテゴリを構造化出力で得る
  *   - suggestHintWord: 次の一手のヒント素材（連想なぞなぞ＋語）を得る
- * 勝敗ルールは lib/shiritori.ts（決定論）が担うため、ここには置かない。
+ *   - generateOpponentWord: AI対戦の一手を得る
+ * 勝敗ルールは public/shiritori.js（決定論）が担うため、ここには置かない。
  *
  * APIキーは Deno.env（サーバー環境変数）からのみ取得し、クライアントには晒さない。
+ * 構造化出力は Groq の response_format: json_object（JSON強制）＋プロンプト指定で担保する。
  */
 
-const ANTHROPIC_API = "https://api.anthropic.com/v1/messages";
-const MODEL = "claude-haiku-4-5-20251001";
+const GROQ_API = "https://api.groq.com/openai/v1/chat/completions";
+// 日本語が使えるモデル。GROQ_MODEL 環境変数で差し替え可能。
+const MODEL = Deno.env.get("GROQ_MODEL") ?? "llama-3.3-70b-versatile";
 
 /** 幼児向けのカテゴリ分類 */
 export const CATEGORIES = [
@@ -24,49 +27,61 @@ export const CATEGORIES = [
 ] as const;
 export type Category = (typeof CATEGORIES)[number];
 
+const CATEGORY_LIST = CATEGORIES.join(" / ");
+
 export class AiError extends Error {}
 export class NoApiKeyError extends AiError {}
 
 function apiKey(): string {
-  const key = Deno.env.get("ANTHROPIC_API_KEY");
-  if (!key) throw new NoApiKeyError("ANTHROPIC_API_KEY is not set");
+  const key = Deno.env.get("GROQ_API_KEY");
+  if (!key) throw new NoApiKeyError("GROQ_API_KEY is not set");
   return key;
 }
 
-/** Anthropic Messages API を tool 強制で呼び、tool_use の input を返す */
-async function callTool(
+/**
+ * Groq に JSON モードで問い合わせ、message.content を JSON パースして返す。
+ * system プロンプトに出力すべきJSONの形を明記しておくこと。
+ */
+async function callJson(
   systemPrompt: string,
   userText: string,
-  tool: Record<string, unknown>,
-  toolName: string,
 ): Promise<Record<string, unknown>> {
-  const res = await fetch(ANTHROPIC_API, {
+  const res = await fetch(GROQ_API, {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      "x-api-key": apiKey(),
-      "anthropic-version": "2023-06-01",
+      "authorization": `Bearer ${apiKey()}`,
     },
     body: JSON.stringify({
       model: MODEL,
-      max_tokens: 300,
       temperature: 0,
-      system: systemPrompt,
-      tools: [tool],
-      tool_choice: { type: "tool", name: toolName },
-      messages: [{ role: "user", content: userText }],
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userText },
+      ],
     }),
   });
   if (!res.ok) {
     const body = await res.text();
-    throw new AiError(`Anthropic API error ${res.status}: ${body}`);
+    throw new AiError(`Groq API error ${res.status}: ${body}`);
   }
   const data = await res.json();
-  const toolUse = (data.content ?? []).find(
-    (c: { type: string }) => c.type === "tool_use",
-  );
-  if (!toolUse) throw new AiError("no tool_use in response");
-  return toolUse.input as Record<string, unknown>;
+  const content = data?.choices?.[0]?.message?.content;
+  if (typeof content !== "string" || content.length === 0) {
+    throw new AiError("no content in Groq response");
+  }
+  try {
+    return JSON.parse(content) as Record<string, unknown>;
+  } catch {
+    throw new AiError(`invalid JSON from Groq: ${content}`);
+  }
+}
+
+function toCategory(v: unknown): Category {
+  return (CATEGORIES as readonly string[]).includes(String(v))
+    ? (v as Category)
+    : "その他";
 }
 
 export interface JudgeResult {
@@ -84,46 +99,15 @@ export interface JudgeResult {
  */
 export async function judgeWord(word: string): Promise<JudgeResult> {
   const system =
-    "あなたは幼児向けしりとりゲームの言葉判定係です。入力された日本語の言葉について、" +
-    "現代仮名遣いのひらがなの「よみ」、実在する一般的な言葉かどうか、そして幼児向けカテゴリを判定します。" +
-    "よみは送り仮名や記号を含めず、その語の読みだけをひらがなで返してください。" +
-    "固有名詞やスラング、造語は isReal=false としてください。";
-  const input = await callTool(
-    system,
-    `つぎの言葉を判定してください: 「${word}」`,
-    {
-      name: "report_word",
-      description: "言葉のよみ・実在性・カテゴリを報告する",
-      input_schema: {
-        type: "object",
-        properties: {
-          reading: {
-            type: "string",
-            description: "現代仮名遣いのひらがなよみ（記号なし）",
-          },
-          isReal: {
-            type: "boolean",
-            description: "実在する一般的な日本語の言葉なら true",
-          },
-          category: {
-            type: "string",
-            enum: CATEGORIES,
-            description: "幼児向けカテゴリ",
-          },
-        },
-        required: ["reading", "isReal", "category"],
-      },
-    },
-    "report_word",
-  );
+    "あなたは幼児向けしりとりゲームの言葉判定係です。入力された日本語の言葉を判定し、" +
+    "次のJSON形式だけを出力してください（前後に説明文を付けない）:\n" +
+    `{"reading": "現代仮名遣いのひらがなよみ（記号なし）", "isReal": true か false, "category": "${CATEGORY_LIST} のいずれか"}\n` +
+    "reading はその語の読みだけをひらがなで。固有名詞やスラング、造語は isReal を false にしてください。";
+  const input = await callJson(system, `判定する言葉: 「${word}」`);
   return {
     reading: String(input.reading ?? ""),
     isReal: Boolean(input.isReal),
-    category: (CATEGORIES as readonly string[]).includes(
-        String(input.category),
-      )
-      ? (input.category as Category)
-      : "その他",
+    category: toCategory(input.category),
   };
 }
 
@@ -148,35 +132,19 @@ export async function suggestHintWord(
 ): Promise<HintWord> {
   const system =
     "あなたは幼児向けしりとりのやさしいヒント係です。指定された文字から始まる、" +
-    "幼児（4〜6歳）が知っていそうな身近な言葉を1つ選びます。" +
-    "そのうえで、答えの言葉そのものは言わずに、特徴で連想させる短いなぞなぞを作ります。" +
-    "なぞなぞはひらがな中心のやさしい言葉で、20文字程度にしてください。";
+    "幼児（4〜6歳）が知っていそうな身近な言葉を1つ選び、" +
+    "答えの言葉そのものは言わずに特徴で連想させる短いなぞなぞ（ひらがな中心・20文字程度）を作ります。" +
+    "次のJSON形式だけを出力してください（前後に説明文を付けない）:\n" +
+    `{"word": "ヒント対象の語（表記）", "reading": "その語のひらがなよみ", "riddle": "答えを言わない短い連想なぞなぞ"}`;
   const used = usedWords.length > 0
     ? `すでに使った言葉: ${usedWords.join("、")}。これらは選ばないでください。`
     : "";
   const cat = category
     ? `できれば「${category}」のカテゴリから選んでください。`
     : "";
-  const input = await callTool(
+  const input = await callJson(
     system,
     `「${nextChar}」からはじまる言葉のヒントを作ってください。${cat}${used}`,
-    {
-      name: "report_hint",
-      description: "ヒント対象の語となぞなぞを報告する",
-      input_schema: {
-        type: "object",
-        properties: {
-          word: { type: "string", description: "ヒント対象の語（表記）" },
-          reading: { type: "string", description: "その語のひらがなよみ" },
-          riddle: {
-            type: "string",
-            description: "答えを言わない短い連想なぞなぞ",
-          },
-        },
-        required: ["word", "reading", "riddle"],
-      },
-    },
-    "report_hint",
   );
   return {
     word: String(input.word ?? ""),
@@ -214,42 +182,20 @@ export async function generateOpponentWord(
   const system = "あなたは幼児向けしりとりゲームの対戦あいてです。" +
     "指定された文字からはじまる実在する日本語の一般名詞を1つ選びます。" +
     level +
-    "ぜったいに「ん」で終わる言葉を選ばないでください。" +
-    "よみは現代仮名遣いのひらがなで、記号を含めないでください。";
+    "ぜったいに「ん」で終わる言葉を選ばないでください。よみは現代仮名遣いのひらがなで記号なし。" +
+    "次のJSON形式だけを出力してください（前後に説明文を付けない）:\n" +
+    `{"word": "打つ語（表記）", "reading": "ひらがなよみ", "category": "${CATEGORY_LIST} のいずれか"}`;
   const avoidList = [...usedWords, ...avoid];
   const used = avoidList.length > 0
     ? `つぎの言葉は使わないでください: ${avoidList.join("、")}。`
     : "";
-  const input = await callTool(
+  const input = await callJson(
     system,
     `「${nextChar}」からはじまる言葉を1つ選んでください。${used}`,
-    {
-      name: "report_move",
-      description: "しりとりの次の一手を報告する",
-      input_schema: {
-        type: "object",
-        properties: {
-          word: { type: "string", description: "打つ語（表記）" },
-          reading: {
-            type: "string",
-            description: "その語の現代仮名遣いのひらがなよみ（記号なし）",
-          },
-          category: {
-            type: "string",
-            enum: CATEGORIES,
-            description: "幼児向けカテゴリ",
-          },
-        },
-        required: ["word", "reading", "category"],
-      },
-    },
-    "report_move",
   );
   return {
     word: String(input.word ?? ""),
     reading: String(input.reading ?? ""),
-    category: (CATEGORIES as readonly string[]).includes(String(input.category))
-      ? (input.category as Category)
-      : "その他",
+    category: toCategory(input.category),
   };
 }
